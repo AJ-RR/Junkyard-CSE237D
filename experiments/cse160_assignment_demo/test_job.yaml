@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-cse160-kubernetes
+  namespace: demo-may-6
+spec:
+  template:
+    spec:
+      containers:
+      - name: opencl-container
+        image: ajayrr/opencl-kube:arm64
+        imagePullPolicy: Always
+        command: ["/bin/bash", "-c", "cd demo_may_5/CSE160Assignment2/PA2 && make run"]
+          #command: ["/bin/bash", "-c", "sleep infinity"]
+      restartPolicy: Never
+  backoffLimit: 0

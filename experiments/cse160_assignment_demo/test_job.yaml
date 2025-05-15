@@ -10,7 +10,7 @@ spec:
       - name: opencl-container
         image: ajayrr/opencl-kube:arm64
         imagePullPolicy: Always
-        command: ["/bin/bash", "-c", "cd demo_may_5/CSE160Assignment2/PA2 && make run"]
+        command: ["/bin/bash", "-c", "/usr/bin/time -v make run > output.log 2>&1"]
           #command: ["/bin/bash", "-c", "sleep infinity"]
       restartPolicy: Never
   backoffLimit: 0

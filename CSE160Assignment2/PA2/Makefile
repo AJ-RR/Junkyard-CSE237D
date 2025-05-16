@@ -30,17 +30,36 @@ solution: ../helper_lib/helper_lib.a main.c
 	cd ../helper_lib; make
 
 run: solution
-	./solution Dataset/0/input0.raw Dataset/0/input1.raw Dataset/0/input2.raw Dataset/0/input3.raw Dataset/0/output.raw Dataset/0/program_1_output.raw Dataset/0/program_2_output.raw
-	./solution Dataset/1/input0.raw Dataset/1/input1.raw Dataset/1/input2.raw Dataset/1/input3.raw Dataset/1/output.raw Dataset/1/program_1_output.raw Dataset/1/program_2_output.raw
-	./solution Dataset/2/input0.raw Dataset/2/input1.raw Dataset/2/input2.raw Dataset/2/input3.raw Dataset/2/output.raw Dataset/2/program_1_output.raw Dataset/2/program_2_output.raw
-	./solution Dataset/3/input0.raw Dataset/3/input1.raw Dataset/3/input2.raw Dataset/3/input3.raw Dataset/3/output.raw Dataset/3/program_1_output.raw Dataset/3/program_2_output.raw
-	./solution Dataset/4/input0.raw Dataset/4/input1.raw Dataset/4/input2.raw Dataset/4/input3.raw Dataset/4/output.raw Dataset/4/program_1_output.raw Dataset/4/program_2_output.raw
-	./solution Dataset/5/input0.raw Dataset/5/input1.raw Dataset/5/input2.raw Dataset/5/input3.raw Dataset/5/output.raw Dataset/5/program_1_output.raw Dataset/5/program_2_output.raw
-	./solution Dataset/6/input0.raw Dataset/6/input1.raw Dataset/6/input2.raw Dataset/6/input3.raw Dataset/6/output.raw Dataset/6/program_1_output.raw Dataset/6/program_2_output.raw
-	./solution Dataset/7/input0.raw Dataset/7/input1.raw Dataset/7/input2.raw Dataset/7/input3.raw Dataset/7/output.raw Dataset/7/program_1_output.raw Dataset/7/program_2_output.raw
-	./solution Dataset/8/input0.raw Dataset/8/input1.raw Dataset/8/input2.raw Dataset/8/input3.raw Dataset/8/output.raw Dataset/8/program_1_output.raw Dataset/8/program_2_output.raw
-	./solution Dataset/9/input0.raw Dataset/9/input1.raw Dataset/9/input2.raw Dataset/9/input3.raw Dataset/9/output.raw Dataset/9/program_1_output.raw Dataset/9/program_2_output.raw
+	mkdir -p run_logs
+	rm -f run_logs/summary.log
+	@for i in $$(seq 0 9); do \
+		echo "Running Dataset $$i..." | tee -a run_logs/summary.log; \
+		./solution Dataset/$$i/input0.raw Dataset/$$i/input1.raw Dataset/$$i/input2.raw Dataset/$$i/input3.raw \
+		          Dataset/$$i/output.raw Dataset/$$i/program_1_output.raw Dataset/$$i/program_2_output.raw \
+		> run_logs/output_$$i.log 2>&1; \
+		if [ $$? -eq 0 ]; then \
+			echo "Dataset $$i: PASS" | tee -a run_logs/summary.log; \
+		else \
+			echo "Dataset $$i: FAIL" | tee -a run_logs/summary.log; \
+			echo "Reason: See run_logs/output_$$i.log" >> run_logs/summary.log; \
+		fi; \
+		echo "" >> run_logs/summary.log; \
+	done
+	@echo "==== Run Summary ===="
+	@cat run_logs/summary.log
 
 clean: 
 	rm -f parallel sequential solution
 	cd ../helper_lib; make clean
+	rm -rf run_logs
+
+grade: run
+	@echo "==== Grading Summary ===="
+	@passed=$$(grep -c "PASS" run_logs/summary.log); \
+	total=10; \
+	echo "Score: $$passed/$$total"; \
+	if [ $$passed -eq $$total ]; then \
+		echo "All datasets passed "; \
+	else \
+		echo "$$((total - passed)) dataset(s) failed "; \
+	fi

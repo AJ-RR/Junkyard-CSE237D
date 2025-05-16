@@ -1,0 +1,18 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: test-cse160-kubernetes-git
+  namespace: test-assignments-git
+spec:
+  template:
+    spec:
+      containers:
+      - name: opencl-container-git
+        image: ajayrr/opencl-kube-git:arm64
+        imagePullPolicy: Always
+          #command: ["/bin/bash", "-c", "/usr/bin/time -v make run > output.log 2>&1"]
+        command: ["/bin/bash", "-c", "git clone https://github.com/AJ-RR/Dummy-CSE160-Assignment.git && cd Dummy-CSE160-Assignment/CSE160Assignment2 && ./evaluate_assignment.sh"]
+          #command: ["/bin/bash", "-c", "cd demo_may_5/CSE160Assignment2/PA2 && make run"]
+          #command: ["/bin/bash", "-c", "sleep infinity"]
+      restartPolicy: Never
+  backoffLimit: 0

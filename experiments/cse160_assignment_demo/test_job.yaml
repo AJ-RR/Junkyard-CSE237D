@@ -13,6 +13,6 @@ spec:
         command: ["/bin/bash", "-c", "date; cd demo_may_5/CSE160Assignment2/PA2 && /usr/bin/time -v make run > output.log 2>&1; date; cat output.log"]
           #command: ["/bin/bash", "-c", "sleep infinity"]
           #command: ["/bin/bash", "-c", "cd demo_may_5/CSE160Assignment2/PA2 && make run"]
-        command: ["/bin/bash", "-c", "sleep infinity"]
+        #command: ["/bin/bash", "-c", "sleep infinity"]
       restartPolicy: Never
   backoffLimit: 0

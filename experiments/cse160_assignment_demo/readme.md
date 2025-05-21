@@ -27,7 +27,7 @@ python3 demo.py
 ```
 This should give the following output:
 
-```bash
+```
 Job 'test-cse160-kubernetes' created successfully in namespace 'demo-may-6'.
 ```
 

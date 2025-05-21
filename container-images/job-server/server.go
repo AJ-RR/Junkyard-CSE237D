@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1" //Use `go get` to install packages
 	corev1 "k8s.io/api/core/v1"
@@ -71,7 +72,7 @@ func main() {
 			http.Error(w, "Missing 'name' or 'image' field", http.StatusBadRequest)
 			return
 		}
-		name := student + "-" + assignment
+		name := fmt.Sprintf("%s-%s-%d", student, assignment, time.Now().Unix())
 
 		//Read file from form into buffer
 		file, _, err := r.FormFile("script")
@@ -101,15 +102,16 @@ func main() {
 			http.Error(w, fmt.Sprintf("Failed to create ConfigMap: %v", err), http.StatusInternalServerError)
 			return
 		}
+		jobClient := clientset.BatchV1().Jobs("default")
 
-		job_ttl := int32(120) //How long to keep job alive after completion
+		job_ttl := int32(120) //How long to keep job alive after completion (120 seconds)
 		// Create the Job that runs the script
 		job := &batchv1.Job{
 			ObjectMeta: meta.ObjectMeta{
 				Name: name,
 			},
 			Spec: batchv1.JobSpec{
-				TTLSecondsAfterFinished: &job_ttl, // Complete job after 2 minutes (120 seconds)
+				TTLSecondsAfterFinished: &job_ttl,
 				Template: corev1.PodTemplateSpec{
 					Spec: corev1.PodSpec{
 						RestartPolicy: corev1.RestartPolicyNever,
@@ -142,15 +144,60 @@ func main() {
 				},
 			},
 		}
-
-		_, err = clientset.BatchV1().Jobs("default").Create(context.TODO(), job, meta.CreateOptions{})
+		_, err = jobClient.Create(context.TODO(), job, meta.CreateOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to create Job: %v", err), http.StatusInternalServerError)
 			return
 		}
+		defer clientset.CoreV1().ConfigMaps("default").Delete(context.TODO(), configMapName, meta.DeleteOptions{})
+		defer jobClient.Delete(context.TODO(), name, meta.DeleteOptions{})
+
+		//Poll for Job completion
+		for {
+			job, err := jobClient.Get(context.TODO(), name, meta.GetOptions{})
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to get job status: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			if job.Status.Succeeded > 0 {
+				break
+			} else if job.Status.Failed > 0 {
+				http.Error(w, "Job failed", http.StatusInternalServerError)
+				return
+			}
+
+			time.Sleep(2 * time.Second)
+		}
+
+		// Get the pod name associated with the job
+		pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{
+			LabelSelector: fmt.Sprintf("job-name=%s", name),
+		})
+		if err != nil || len(pods.Items) == 0 {
+			http.Error(w, "Failed to list pods for job", http.StatusInternalServerError)
+			return
+		}
+
+		podName := pods.Items[0].Name
+
+		// Fetch logs from the pod
+		logReq := clientset.CoreV1().Pods("default").GetLogs(podName, &corev1.PodLogOptions{})
+		logStream, err := logReq.Stream(context.TODO())
+		if err != nil {
+			http.Error(w, "Failed to stream pod logs", http.StatusInternalServerError)
+			return
+		}
+		defer logStream.Close()
+
+		logs, err := io.ReadAll(logStream)
+		if err != nil {
+			http.Error(w, "Failed to read pod logs", http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(JobResponse{Status: "Job created"})
+		w.Write(logs)
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

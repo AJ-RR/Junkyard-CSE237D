@@ -4,6 +4,7 @@ A quick-start guide for launching a grading job on the phone-cluster
 ---
 
 ## 1.  Clone the repository
+Run these steps after ssh'ing into automaton
 ```bash
 git clone https://github.com/AJ-RR/Junkyard-CSE237D.git
 cd Junkyard-CSE237D/experiments/cse160_assignment_demo

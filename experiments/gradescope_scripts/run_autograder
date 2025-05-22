@@ -2,11 +2,9 @@
 set -e
 
 # Config
-HOST=smartcycling.sysnet.ucsd.edu/gradescope/submit
-SUBMISSION_DIR="/autograder/submission"
-RESULTS_JSON="/autograder/results/results.json"
+URL="https://smartcycling.sysnet.ucsd.edu/gradescope/submit"  # Replace with actual server URL if needed
 ZIP_FILE="/tmp/submission.zip"
-METADATA_FILE="$SUBMISSION_DIR/submission_metadata.json"
+RESULTS_JSON="/autograder/results/results.json"
 
 STUDENT_NAME=$(jq -r '.users[0].name' "$METADATA_FILE")
 ASSIGNMENT_TITLE=$(jq -r '.assignment.title' "$METADATA_FILE")
@@ -16,24 +14,14 @@ cd "$SUBMISSION_DIR"
 zip -r "$ZIP_FILE" ./*
 cd -
 
-# Stream the zip file directly to the remote curl via SSH
-RESPONSE=$(curl -s -X POST "$HOST" \
-  -F name=$STUDENT_NAME \
-  -F image=$ASSIGNMENT_TITLE \
-  -F script=@"$ZIP_FILE")
+# Make POST request
+curl -X POST "$URL" \
+  -F "name=$NAME" \
+  -F "image=$IMAGE" \
+  -F "script=@$ZIP_FILE" \
+  -H "Content-Type: multipart/form-data" \
+  -o "$RESULTS_JSON"
 
-# Parse and write results
-SCORE=$(echo "$RESPONSE" | jq -r '.score // 0')
-OUTPUT=$(echo "$RESPONSE" | jq -r '.output // "No output"')
-VISIBILITY=$(echo "$RESPONSE" | jq -r '.visibility // "visible"')
-STDOUT_VISIBILITY=$(echo "$RESPONSE" | jq -r '.stdout_visibility // "visible"')
+# Output saved location
+echo "Response written to $RESULTS_JSON"
 
-mkdir -p "$(dirname $RESULTS_JSON)"
-cat <<EOF > "$RESULTS_JSON"
-{
-  "score": $SCORE,
-  "output": "$OUTPUT",
-  "visibility": "$VISIBILITY",
-  "stdout_visibility": "$STDOUT_VISIBILITY"
-}
-EOF

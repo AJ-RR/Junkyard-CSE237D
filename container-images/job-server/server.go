@@ -129,10 +129,12 @@ func main() {
 						},
 						Containers: []corev1.Container{
 							{
-								Name:    "runner",
-								Image:   "ajayrr/opencl-kube-git:arm64", //Python image for container
+								Name:  "runner",
+								Image: "arunanthivi/job-grader:python", //Python image for container
+								// Image: "ajayrr/opencl-kube-git:arm64", //Python image for container
 								//ImagePullPolicy: corev1.PullAlways,
-								Command: []string{"sh", "-c", "unzip /scripts/archive.zip -d /home/ubuntu && cp -r /home/ubuntu/Dataset /home/ubuntu/CSE160Assignment2/PA2 && cd /home/ubuntu/CSE160Assignment2/PA2 && make run && sleep infinity"},
+								Command: []string{"sh", "-c", "unzip /scripts/archive.zip -d /app >/dev/null 2>&1 && python /app/harness.py 2>/app/error.log"},
+								// Command: []string{"sh", "-c", "unzip /scripts/archive.zip -d /home/ubuntu && cp -r /home/ubuntu/Dataset /home/ubuntu/PA2 && cd /home/ubuntu/PA2 && make run && sleep infinity"},
 								VolumeMounts: []corev1.VolumeMount{
 									{
 										Name:      "script-volume",

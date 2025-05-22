@@ -131,7 +131,7 @@ func main() {
 							{
 								Name:    "runner",
 								Image:   "ajayrr/opencl-kube-git:arm64", //Python image for container
-								Command: []string{"sh", "-c", "unzip /scripts/archive.zip -d /home/ubuntu && cp -r /home/ubuntu/Dataset /home/ubuntu/CSE160Assignment2/PA2 && make -C /home/ubuntu/CSE160Assignment2/PA2 && sleep infinity"},
+								Command: []string{"sh", "-c", "unzip /scripts/archive.zip -d /home/ubuntu && cp -r /home/ubuntu/Dataset /home/ubuntu/CSE160Assignment2/PA2 && cd /home/ubuntu/CSE160Assignment2/PA2 && sleep infinity"},
 								VolumeMounts: []corev1.VolumeMount{
 									{
 										Name:      "script-volume",

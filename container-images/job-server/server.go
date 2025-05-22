@@ -82,7 +82,7 @@ func main() {
 		}
 		defer file.Close()
 
-		scriptData, err := io.ReadAll(file)
+		zipData, err := io.ReadAll(file)
 		if err != nil {
 			http.Error(w, "Failed to read script file", http.StatusInternalServerError)
 			return
@@ -94,8 +94,8 @@ func main() {
 			ObjectMeta: meta.ObjectMeta{
 				Name: configMapName,
 			},
-			Data: map[string]string{
-				"main.py": string(scriptData),
+			BinaryData: map[string][]byte{
+				"archive.zip": zipData,
 			},
 		}, meta.CreateOptions{})
 		if err != nil {
@@ -130,8 +130,8 @@ func main() {
 						Containers: []corev1.Container{
 							{
 								Name:    "runner",
-								Image:   "python:3.9", //Python image for container
-								Command: []string{"python", "/scripts/main.py"},
+								Image:   "ajayrr/opencl-kube-git:arm64", //Python image for container
+								Command: []string{"sh", "-c", "unzip /submission/archive.zip -d /home/ubuntu && cp -r /home/ubuntu/Dataset /home/ubuntu/CSE160Assignment2/PA2 && make -C /home/ubuntu/CSE160Assignment2/PA2"},
 								VolumeMounts: []corev1.VolumeMount{
 									{
 										Name:      "script-volume",

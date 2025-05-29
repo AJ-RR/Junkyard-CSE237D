@@ -73,6 +73,7 @@ func main() {
 			return
 		}
 		name := fmt.Sprintf("%s-%s-%d", student, assignment, time.Now().Unix())
+		startTime := time.Now() 
 
 		//Read file from form into buffer
 		file, _, err := r.FormFile("script")
@@ -198,8 +199,11 @@ func main() {
 			return
 		}
 
+		completion := time.Now()
+		updateLatency(startTime, completion)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(logs)
+		
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

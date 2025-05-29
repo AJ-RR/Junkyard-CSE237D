@@ -1,7 +1,7 @@
 CC       = gcc
 CFLAGS   = -g -Wall
-INCFLAGS := -I../helper_lib
-LDFLAGS  := ../helper_lib/helper_lib.a -lm
+INCFLAGS := -I./helper_lib
+LDFLAGS  := ./helper_lib/helper_lib.a -lm
 
 UNAME_O := $(shell uname -o)
 UNAME_M := $(shell uname -m)
@@ -21,7 +21,7 @@ endif
 
 all: solution
 
-solution: ../helper_lib/helper_lib.a main.c
+solution: ./helper_lib/helper_lib.a main.c
 	$(CC) $(CFLAGS) -o $@ $^ $(INCFLAGS) $(LDFLAGS)
 
 run: solution
@@ -64,7 +64,7 @@ run: solution
 
 clean:
 	rm -f parallel sequential solution
-	cd ../helper_lib; make clean
+	cd ./helper_lib; make clean
 	rm -rf run_logs
 	rm -f results.json
 

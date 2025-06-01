@@ -9,12 +9,22 @@ Contains the source code and Kubernetes manifests for a REST-based job submissio
 - Includes latency tracking across jobs (`metrics.go`) and job lifecycle handling (`server.go`).
 - Comes with a `Dockerfile` and deployment configuration (`jobserver.yaml`).
 
-**Refer to [`Documentation/Setup-JobServer-Service`](./Documentation/Setup-JobServer-Service/README.md)** for further detailed instructions
+Key files:
+- `server.go`: HTTP server that handles submissions and spawns Kubernetes Jobs.
+- `metrics.go`: Tracks execution time metrics across jobs.
+- `jobserver.yaml`: Kubernetes ServiceAccount, Role, RoleBinding, Deployment, and Service definitions.
+- `Dockerfile`, `go.mod`, `go.sum`: For building and running the server in a container.
+
+**Refer to [`Documentation/Setup-JobServer-Service`](./Documentation/Setup-Jobserver-Service/README.md)** for further detailed instructions
 
 ### 📁 python-grader
-Likely contains a Dockerfile and scripts for a Python-based grading container:
-- Used by the `job-server` to execute student-submitted Python assignments.
-- May include a `Makefile` or similar mechanism for automated grading logic.
+
+A containerized Python-based autograder using `gradescope-utils`.
+
+Key components:
+- `Dockerfile`: Builds an image from `python:3.13-slim`, installs `gradescope-utils`, and copies test harness and test cases.
+- `harness.py`: Discovers and runs `unittest` test cases using Gradescope's `JSONTestRunner`.
+- `tests/`: Directory containing Python unit tests that define pass/fail logic for student submissions.
 
 ### 📁 python-hello-world
 A simple test container image setup:

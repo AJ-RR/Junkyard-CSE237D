@@ -2,7 +2,7 @@
 
 This directory contains Docker images and related components used for running and grading jobs inside containers.
 
-### 📁 job-server
+### job-server
 Contains the source code and Kubernetes manifests for a REST-based job submission server:
 - Launches jobs in a Kubernetes cluster based on user-submitted ZIP files.
 - Creates `ConfigMaps`, `Jobs`, and fetches logs from resulting pods.
@@ -17,7 +17,7 @@ Key files:
 
 **Refer to [`Documentation/Setup-JobServer-Service`](./Documentation/Setup-Jobserver-Service/README.md)** for further detailed instructions
 
-### 📁 python-grader
+### python-grader
 
 A containerized Python-based autograder using `gradescope-utils`.
 
@@ -26,11 +26,6 @@ Key components:
 - `harness.py`: Discovers and runs `unittest` test cases using Gradescope's `JSONTestRunner`.
 - `tests/`: Directory containing Python unit tests that define pass/fail logic for student submissions.
 
-### 📁 python-hello-world
-A simple test container image setup:
-- Likely includes a basic `hello.py` script or similar.
-- Used for verifying that the job submission infrastructure is working end-to-end.
-
-### 📄 README.md
-Documentation for building and understanding the container images in this directory.
+### python-hello-world
+A simple test container image setup used for verifying that the job submission infrastructure is working end-to-end.
 

@@ -1,5 +1,3 @@
-# Green Grader Documentation
-
 # Documentation Overview
 
 This directory contains documentation for each of the steps required to reporduce the Automated Grading System via the Phone Cluster. There is also a short description and link to the corresponding direcotry based on the specific information and steps you are looking for.

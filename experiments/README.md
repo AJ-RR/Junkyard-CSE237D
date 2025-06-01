@@ -45,3 +45,12 @@ This folder is designed to launch multiple parallel Kubernetes jobs for running 
 - Tracks and prints the time taken for each job to complete.
 
 ### python_client
+
+This script creates and submits a Kubernetes Job using the official Kubernetes Python client.
+
+## What It Does
+
+- Loads a specified kubeconfig to connect to a Kubernetes cluster.
+- Reads a job YAML template and injects a given job name.
+- Uses the Kubernetes API to create the job in the desired namespace.
+- Prints success or error messages.

@@ -34,6 +34,14 @@ Key files:
 - `setup.sh`: Installs required system packages (`ssh`, `curl`, `jq`, and `zip`) inside the container environment.
 
 ### multiple_jobs_metrics
+This folder is designed to launch multiple parallel Kubernetes jobs for running evaluation or training scripts in isolated pods. It helps automate and scale workloads like model evaluation, grading, or experimentation across a cluster.
 
+## What It Does
+
+- Connects to a Kubernetes cluster using your kubeconfig.
+- Dynamically creates job definitions for each task you want to run.
+- Launches the jobs in a specified namespace using a specified Docker image.
+- Executes a custom shell command inside each job's container.
+- Tracks and prints the time taken for each job to complete.
 
 ### python_client

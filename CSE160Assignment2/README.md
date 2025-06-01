@@ -12,6 +12,6 @@ To evaluate the performance of the Green Grader, we used CSE160 Assignment 2 as 
   - It is a customized version of Professor Kastner’s original CSE160 POCL container.
   - The container includes a modified `Makefile` and pre-installed helper files to match the system’s environment.
 
-**Refer to [`Documentation/Setup-OpenCL`](./Documentation/Setup-OpenCL.md)** for detailed instructions on:
+**Refer to [`Documentation/Setup-OpenCL`](./Documentation/Setup-OpenCL/README.md)** for detailed instructions on:
 - Setting up the POCL container within a Kubernetes environment
 - Modifications made to the original `Makefile` to adapt it to the operating system used in our testbed

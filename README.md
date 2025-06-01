@@ -7,6 +7,7 @@ The cluster consists of sixteen Google Pixel Fold phones connected to a workstat
 The MVP design consists of three main parts: (a) a phone cluster with a master node (control plane) and workers, (b) external users, and (c) a container image repository. The control plane manages the cluster via components like the API server, network manager, and scheduler. External users interact with the cluster using Kubernetes Python APIs, providing a kubeconfig file and control plane IP. Jobs are defined in YAML scripts, specifying container images and commands. These containers, built and stored in repositories like DockerHub, are pulled by the control plane when jobs run. Frequently used images are cached to reduce download overhead.
 
 ![alt text](images/MVPDesign.jpg)
+![alt text](images/PhoneCluster.jpg)
 
 The demo video for our MVP is linked here: https://drive.google.com/file/d/1OZ91TmYszhsiNwLxHcVTKsSIAbj3IPGc/view?usp=sharing
 

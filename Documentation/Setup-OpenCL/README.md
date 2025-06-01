@@ -63,9 +63,9 @@ This Makefile automates running tests, handles errors, and formats results for G
 
 ### How to Use
 
-- Build and run all tests, generate results, and print JSON output:  
-  ```
-  bash
+- Build and run all tests, generate results, and print JSON output:
+- 
+  ```bash
   make run
   ```
 

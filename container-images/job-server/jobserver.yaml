@@ -54,7 +54,7 @@ spec:
       serviceAccountName: job-server-sa
       containers:
         - name: job-server
-          image: arunanthivi/k8s-job-server:latest
+          image: docker pull arunanthivi/k8s-job-server:v2
           ports:
             - containerPort: 5000
 ---

@@ -134,7 +134,14 @@ func main() {
 								// Image: "arunanthivi/job-grader:python", //Python image for container
 								Image:           "rsankar12/opencl_cse160", //Rishab's OpenCL image for container
 								ImagePullPolicy: corev1.PullAlways,
-								Command:         []string{"sh", "-c", "unzip /scripts/archive.zip -d $HOME >/dev/null 2>&1 && make -s run"},
+								Command: []string{
+  "sh", "-c",
+  "unzip /scripts/archive.zip -d $HOME >/dev/null 2>&1 && " +
+  "cd $HOME/CSE160Assignment2/PA2 && " +                 // adjust if needed
+  "make -s run > /tmp/out 2>&1; RC=$?; " +
+  // if make failed, still emit JSON Gradescope can parse
+  "if [ $RC -ne 0 ]; then echo '{\"score\":0}' ; else cat /tmp/out ; fi",
+},
 								VolumeMounts: []corev1.VolumeMount{
 									{
 										Name:      "script-volume",

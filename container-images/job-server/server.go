@@ -167,53 +167,53 @@ func main() {
 		defer jobClient.Delete(context.TODO(), name, meta.DeleteOptions{})
 
 		//Poll for Job completion
-		for {
-			job, err := jobClient.Get(context.TODO(), name, meta.GetOptions{})
-			if err != nil {
-				http.Error(w, fmt.Sprintf("Failed to get job status: %v", err), http.StatusInternalServerError)
-				return
-			}
+		// for {
+		// 	job, err := jobClient.Get(context.TODO(), name, meta.GetOptions{})
+		// 	if err != nil {
+		// 		http.Error(w, fmt.Sprintf("Failed to get job status: %v", err), http.StatusInternalServerError)
+		// 		return
+		// 	}
 
-			if job.Status.Succeeded > 0 {
-				break
-			} else if job.Status.Failed > 0 {
-				http.Error(w, "Job failed", http.StatusInternalServerError)
-				return
-			}
+		// 	if job.Status.Succeeded > 0 {
+		// 		break
+		// 	} else if job.Status.Failed > 0 {
+		// 		http.Error(w, "Job failed", http.StatusInternalServerError)
+		// 		return
+		// 	}
 
-			time.Sleep(2 * time.Second)
-		}
+		// 	time.Sleep(2 * time.Second)
+		// }
 
 		// Get the pod name associated with the job
-		pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{
-			LabelSelector: fmt.Sprintf("job-name=%s", name),
-		})
-		if err != nil || len(pods.Items) == 0 {
-			http.Error(w, "Failed to list pods for job", http.StatusInternalServerError)
-			return
-		}
+		// pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{
+		// 	LabelSelector: fmt.Sprintf("job-name=%s", name),
+		// })
+		// if err != nil || len(pods.Items) == 0 {
+		// 	http.Error(w, "Failed to list pods for job", http.StatusInternalServerError)
+		// 	return
+		// }
 
-		podName := pods.Items[0].Name
+		// podName := pods.Items[0].Name
 
-		// Fetch logs from the pod
-		logReq := clientset.CoreV1().Pods("default").GetLogs(podName, &corev1.PodLogOptions{})
-		logStream, err := logReq.Stream(context.TODO())
-		if err != nil {
-			http.Error(w, "Failed to stream pod logs", http.StatusInternalServerError)
-			return
-		}
-		defer logStream.Close()
+		// // Fetch logs from the pod
+		// logReq := clientset.CoreV1().Pods("default").GetLogs(podName, &corev1.PodLogOptions{})
+		// logStream, err := logReq.Stream(context.TODO())
+		// if err != nil {
+		// 	http.Error(w, "Failed to stream pod logs", http.StatusInternalServerError)
+		// 	return
+		// }
+		// defer logStream.Close()
 
-		logs, err := io.ReadAll(logStream)
-		if err != nil {
-			http.Error(w, "Failed to read pod logs", http.StatusInternalServerError)
-			return
-		}
+		// logs, err := io.ReadAll(logStream)
+		// if err != nil {
+		// 	http.Error(w, "Failed to read pod logs", http.StatusInternalServerError)
+		// 	return
+		// }
 
 		completion := time.Now()
 		updateLatency(startTime, completion)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(logs)
+		// w.Write(logs)
 		
 	})
 

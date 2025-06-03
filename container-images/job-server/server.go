@@ -136,11 +136,15 @@ func main() {
 								ImagePullPolicy: corev1.PullAlways,
 								Command: []string{
   "sh", "-c",
+  // ① unzip silently
   "unzip /scripts/archive.zip -d $HOME >/dev/null 2>&1 && " +
-  "cd $HOME/CSE160Assignment2/PA2 && " +                 // adjust if needed
-  "make -s run > /tmp/out 2>&1; RC=$?; " +
-  // if make failed, still emit JSON Gradescope can parse
-  "if [ $RC -ne 0 ]; then echo '{\"score\":0}' ; else cat /tmp/out ; fi",
+  // ② locate the PA2 folder (first match) and cd into it, suppressing errors
+  "PA2DIR=$(find $HOME -type d -name PA2 | head -n1) && " +
+  "{ cd \"$PA2DIR\" 2>/dev/null || EXIT=1; } && " +
+  // ③ run make, capture output and exit‐code only if cd succeeded
+  "if [ \"$EXIT\" != \"1\" ]; then make -s run > /tmp/out 2>&1; EXIT=$?; fi; " +
+  // ④ emit *only* JSON, then exit 0
+  "if [ \"$EXIT\" != \"0\" ]; then echo '{\"score\":0}'; else cat /tmp/out; fi",
 },
 								VolumeMounts: []corev1.VolumeMount{
 									{

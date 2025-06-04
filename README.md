@@ -22,3 +22,9 @@ This repository contains various components related to course assignments, conta
 - [`experiments`](./experiments): Contains experimental code, scripts, and test cases.
 - [`images`](./images): Stores images used in documentation or reports.
 - [`scripts`](./scripts): Utility scripts used for automation, setup, or testing.
+
+---
+
+## FishSense
+
+Information on the work done on FishSense can be found in this [repository](https://github.com/CatFish47/RayServiceImageCaption). This includes both the code as well as the documentation on how to setup FishSense on the cluster and how we got there.

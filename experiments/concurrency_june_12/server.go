@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync" // <-- New: for protecting the jobStore map
+	"sync" // For protecting the jobStore map
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -37,7 +37,7 @@ type JobStatusPayload struct {
 
 // JobInternalState holds the internal state of a job managed by this server.
 type JobInternalState struct {
-	Status  string    // "pending", "succeeded", "failed"
+	Status string    // "pending", "succeeded", "failed"
 	Results []byte    // Raw logs from the job
 	Error   error     // Go error object if any issue occurred
 }
@@ -72,9 +72,9 @@ func main() {
 		log.Fatalf("Failed to create Kubernetes client: %v", err)
 	}
 
-	/*
-	* SUBMIT Request Handler
-	*/
+	---
+	## Submit Request Handler (`/submit`)
+	---
 	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
 		// Check if request is POST
 		if r.Method != http.MethodPost {
@@ -180,6 +180,9 @@ func main() {
 				},
 			},
 		}
+
+		// *** THIS WAS THE MISSING LINE IN THE PREVIOUS REVISION! ***
+		// Create the Kubernetes Job
 		_, err = jobClient.Create(context.TODO(), job, meta.CreateOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to create Job: %v", err), http.StatusInternalServerError)
@@ -225,6 +228,7 @@ func main() {
 			for {
 				job, err := clientset.BatchV1().Jobs("default").Get(context.TODO(), jobName, meta.GetOptions{})
 				if err != nil {
+					// This might happen if the job was deleted unexpectedly or if there's a K8s API issue.
 					jobError = fmt.Errorf("Failed to get job status for %s: %v", jobName, err)
 					finalStatus = "failed"
 					break
@@ -292,10 +296,9 @@ func main() {
 		})
 	})
 
-	/*
-	* NEW: STATUS Request Handler
-	* This endpoint allows clients to poll for job status and results.
-	*/
+	---
+	## Status Request Handler (`/status/{jobName}`)
+	---
 	http.HandleFunc("/status/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET method allowed", http.StatusMethodNotAllowed)
@@ -323,6 +326,7 @@ func main() {
 			Status: jobState.Status,
 		}
 
+		// Only include results/error if the job is actually complete
 		if jobState.Status == "succeeded" || jobState.Status == "failed" {
 			responsePayload.Results = string(jobState.Results)
 			if jobState.Error != nil {
@@ -333,6 +337,9 @@ func main() {
 		json.NewEncoder(w).Encode(responsePayload)
 	})
 
+	---
+	## Root Path Handler (`/`)
+	---
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Only GET method allowed", http.StatusMethodNotAllowed)

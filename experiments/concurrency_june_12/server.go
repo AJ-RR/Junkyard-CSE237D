@@ -353,3 +353,5 @@ func main() {
 	log.Println("Server listening on :5000")
 	log.Fatal(http.ListenAndServe(":5000", nil))
 }
+
+// Dummy updateLatency function - define as needed or remove if not used

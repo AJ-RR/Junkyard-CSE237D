@@ -303,7 +303,8 @@ func main() {
 		// Extract jobName from the URL path, e.g., /status/my-job-name
 		jobName := strings.TrimPrefix(r.URL.Path, "/status/")
 		if jobName == "" {
-			http.Error(w, "Missing job ID in URL path, e.StatusBadRequest")
+			// FIX: Added http.StatusBadRequest as the third argument
+			http.Error(w, "Missing job ID in URL path, e.g., /status/my-job-name", http.StatusBadRequest)
 			return
 		}
 

@@ -1,0 +1,89 @@
+#!/bin/bash
+set -e
+
+URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope" # adjust to your Go server's URL
+SUBMISSION_DIR="/autograder/submission"
+ZIP_FILE="/tmp/submission.zip"
+RESULTS_JSON="/autograder/results/results.json"
+TIMEOUT=300         # seconds for overall job completion
+INTERVAL=3          # poll interval in seconds
+
+# 1. Zip submission
+cd "$SUBMISSION_DIR"
+zip -qr "$ZIP_FILE" .
+cd -
+
+# 2. Submit job to Go server and get JOB_ID
+echo "Submitting job to Go server..."
+SUBMIT_RESP=$(curl -s -F "name=$STUDENT_NAME" \
+                  -F "image=$ASSIGNMENT_TITLE" \
+                  -F "script=@$ZIP_FILE" \
+                  "$URL_BASE/submit")
+
+# Check for cURL errors or empty response
+if [ $? -ne 0 ]; then
+    echo "Error submitting job: cURL failed." >&2
+    echo '{"score": 0, "output": "Failed to submit job to grading server."}' > "$RESULTS_JSON"
+    exit 1
+fi
+
+JOB_ID=$(echo "$SUBMIT_RESP" | jq -r '.job_id')
+SUBMIT_STATUS=$(echo "$SUBMIT_RESP" | jq -r '.status')
+
+if [ -z "$JOB_ID" ] || [ "$SUBMIT_STATUS" != "Job created, please poll /status/$JOB_ID for results" ]; then
+    echo "Error: Failed to get valid JOB_ID from submission. Server response: $SUBMIT_RESP" >&2
+    echo '{"score": 0, "output": "Failed to initiate grading job."}' > "$RESULTS_JSON"
+    exit 1
+fi
+
+echo "Job submitted. JOB_ID: $JOB_ID. Polling for results..."
+
+# 3. Poll for job status
+END_TIME=$(( SECONDS + TIMEOUT ))
+JOB_COMPLETE=false
+JOB_RESULTS=""
+JOB_ERROR=""
+
+while [ $SECONDS -lt "$END_TIME" ]; do
+    STATUS_RESP=$(curl -s "$URL_BASE/status/$JOB_ID")
+    
+    if [ $? -ne 0 ]; then
+        echo "Error polling job status: cURL failed." >&2
+        # Don't exit immediately, retry until timeout
+    fi
+
+    CURRENT_STATUS=$(echo "$STATUS_RESP" | jq -r '.status')
+    
+    if [ "$CURRENT_STATUS" == "succeeded" ] || [ "$CURRENT_STATUS" == "failed" ]; then
+        JOB_RESULTS=$(echo "$STATUS_RESP" | jq -r '.results')
+        JOB_ERROR=$(echo "$STATUS_RESP" | jq -r '.error // ""') # Use // "" to handle null error
+        JOB_COMPLETE=true
+        break
+    fi
+
+    echo "Job $JOB_ID is still $CURRENT_STATUS. Waiting $INTERVAL seconds..."
+    sleep "$INTERVAL"
+done
+
+if [ "$JOB_COMPLETE" == "false" ]; then
+    echo "Error: Job $JOB_ID timed out after $TIMEOUT seconds." >&2
+    echo '{"score": 0, "output": "Grading job timed out."}' > "$RESULTS_JSON"
+    exit 1
+fi
+
+# 4. Write results to results.json
+if [ -n "$JOB_ERROR" ]; then
+    echo "Job $JOB_ID completed with errors: $JOB_ERROR" >&2
+    # If the job itself reported an error, ensure it's reflected in results.json
+    echo '{"score": 0, "output": "Grading job failed: '"$JOB_ERROR"'\nJob Output:\n'"$JOB_RESULTS"'"}' > "$RESULTS_JSON"
+else
+    echo "Job $JOB_ID completed successfully. Writing results to $RESULTS_JSON"
+    # Assuming your job output is already valid JSON for Gradescope
+    echo "$JOB_RESULTS" > "$RESULTS_JSON"
+fi
+
+# Verify results.json content for debugging (optional)
+echo "Content of $RESULTS_JSON:"
+cat "$RESULTS_JSON"
+
+exit 0

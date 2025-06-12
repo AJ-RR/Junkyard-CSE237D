@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync" // <-- New: for protecting the jobStore map
 	"time"
-	"sync"
 
-	batchv1 "k8s.io/api/batch/v1" //Use `go get` to install packages
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -21,19 +21,32 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+// JobResponse is sent back to the client immediately after job creation.
 type JobResponse struct {
 	Status string `json:"status"`
+	JobID  string `json:"job_id,omitempty"` // Add JobID for client to poll
 	Error  string `json:"error,omitempty"`
 }
 
-var (
-    jobResults = make(map[string][]byte) // job-name → logs / JSON
-    jobTimes   = make(map[string]struct {
-        Start time.Time
-        End   time.Time
-    })
-    mu sync.Mutex                        // guards both maps
-)
+// JobStatusPayload is sent back to the client when polling for status.
+type JobStatusPayload struct {
+	Status  string `json:"status"`            // "pending", "succeeded", "failed"
+	Results string `json:"results,omitempty"` // Logs from the job
+	Error   string `json:"error,omitempty"`   // Error message if job failed or logs couldn't be fetched
+}
+
+// JobInternalState holds the internal state of a job managed by this server.
+type JobInternalState struct {
+	Status  string    // "pending", "succeeded", "failed"
+	Results []byte    // Raw logs from the job
+	Error   error     // Go error object if any issue occurred
+}
+
+// jobStore is an in-memory map to store the state of all active jobs.
+// IMPORTANT: For production, this should be replaced with a persistent store
+// like Redis or a database, as map data will be lost on server restart.
+var jobStore = make(map[string]*JobInternalState)
+var jobStoreMutex sync.Mutex // Mutex to protect jobStore from concurrent access
 
 func main() {
 	// Load kubeconfig from default or env var
@@ -58,12 +71,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create Kubernetes client: %v", err)
 	}
-	/*
-	*  SUBMIT Request Handler
-	 */
-	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
 
-		//Check if request is POST
+	/*
+	* SUBMIT Request Handler
+	*/
+	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
+		// Check if request is POST
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST method allowed", http.StatusMethodNotAllowed)
 			return
@@ -75,7 +88,7 @@ func main() {
 			return
 		}
 
-		//Read metadata of request (Student name, assignment name, etc.)
+		// Read metadata of request (Student name, assignment name, etc.)
 		student := strings.ToLower(r.FormValue("name"))
 		assignment := strings.ToLower(r.FormValue("image"))
 		if student == "" || assignment == "" {
@@ -83,9 +96,9 @@ func main() {
 			return
 		}
 		name := fmt.Sprintf("%s-%s-%d", student, assignment, time.Now().Unix())
-		startTime := time.Now() 
+		// startTime := time.Now() // Keep for potential latency tracking later
 
-		//Read file from form into buffer
+		// Read file from form into buffer
 		file, _, err := r.FormFile("script")
 		if err != nil {
 			http.Error(w, "Missing 'script' file", http.StatusBadRequest)
@@ -115,7 +128,7 @@ func main() {
 		}
 		jobClient := clientset.BatchV1().Jobs("default")
 
-		job_ttl := int32(120) //How long to keep job alive after completion (120 seconds)
+		job_ttl := int32(120) // How long to keep job alive after completion (120 seconds)
 		// Create the Job that runs the script
 		job := &batchv1.Job{
 			ObjectMeta: meta.ObjectMeta{
@@ -140,22 +153,21 @@ func main() {
 						},
 						Containers: []corev1.Container{
 							{
-								Name: "runner",
-								// Image: "arunanthivi/job-grader:python", //Python image for container
-								Image:           "rsankar12/opencl_cse160", //Rishab's OpenCL image for container
+								Name:            "runner",
+								Image:           "rsankar12/opencl_cse160", // Rishab's OpenCL image for container
 								ImagePullPolicy: corev1.PullAlways,
 								Command: []string{
-  "sh", "-c",
-  // ① unzip silently
-  "unzip /scripts/archive.zip -d $HOME >/dev/null 2>&1 && " +
-  // ② locate the PA2 folder (first match) and cd into it, suppressing errors
-  "PA2DIR=$(find $HOME -type d -name PA2 | head -n1) && " +
-  "{ cd \"$PA2DIR\" 2>/dev/null || EXIT=1; } && " +
-  // ③ run make, capture output and exit‐code only if cd succeeded
-  "if [ \"$EXIT\" != \"1\" ]; then make -s run > /tmp/out 2>&1; EXIT=$?; fi; " +
-  // ④ emit *only* JSON, then exit 0
-  "if [ \"$EXIT\" != \"0\" ]; then echo '{\"score\":0}'; else cat /tmp/out; fi",
-},
+									"sh", "-c",
+									// ① unzip silently
+									"unzip /scripts/archive.zip -d $HOME >/dev/null 2>&1 && " +
+										// ② locate the PA2 folder (first match) and cd into it, suppressing errors
+										"PA2DIR=$(find $HOME -type d -name PA2 | head -n1) && " +
+										"{ cd \"$PA2DIR\" 2>/dev/null || EXIT=1; } && " +
+										// ③ run make, capture output and exit‐code only if cd succeeded
+										"if [ \"$EXIT\" != \"1\" ]; then make -s run > /tmp/out 2>&1; EXIT=$?; fi; " +
+										// ④ emit *only* JSON, then exit 0
+										"if [ \"$EXIT\" != \"0\" ]; then echo '{\"score\":0}'; else cat /tmp/out; fi",
+								},
 								VolumeMounts: []corev1.VolumeMount{
 									{
 										Name:      "script-volume",
@@ -171,75 +183,155 @@ func main() {
 		_, err = jobClient.Create(context.TODO(), job, meta.CreateOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to create Job: %v", err), http.StatusInternalServerError)
+			// Clean up configmap if job creation failed
+			deleteErr := clientset.CoreV1().ConfigMaps("default").Delete(context.TODO(), configMapName, meta.DeleteOptions{})
+			if deleteErr != nil {
+				log.Printf("Warning: Failed to delete ConfigMap %s after job creation failure: %v", configMapName, deleteErr)
+			}
 			return
 		}
-		defer clientset.CoreV1().ConfigMaps("default").Delete(context.TODO(), configMapName, meta.DeleteOptions{})
-		defer jobClient.Delete(context.TODO(), name, meta.DeleteOptions{})
 
-		//Poll for Job completion
-		// for {
-		// 	job, err := jobClient.Get(context.TODO(), name, meta.GetOptions{})
-		// 	if err != nil {
-		// 		http.Error(w, fmt.Sprintf("Failed to get job status: %v", err), http.StatusInternalServerError)
-		// 		return
-		// 	}
+		// Initialize job status in our store
+		jobStoreMutex.Lock()
+		jobStore[name] = &JobInternalState{
+			Status: "pending",
+		}
+		jobStoreMutex.Unlock()
 
-		// 	if job.Status.Succeeded > 0 {
-		// 		break
-		// 	} else if job.Status.Failed > 0 {
-		// 		http.Error(w, "Job failed", http.StatusInternalServerError)
-		// 		return
-		// 	}
+		// Start a goroutine to monitor the job and update its status
+		go func(jobName string, cfgMapName string, clientset *kubernetes.Clientset) {
+			log.Printf("Starting goroutine to monitor job %s", jobName)
 
-		// 	time.Sleep(2 * time.Second)
-		// }
+			// Ensure ConfigMap and Job are eventually deleted after monitoring completes
+			defer func() {
+				log.Printf("Attempting to delete ConfigMap %s for job %s", cfgMapName, jobName)
+				deleteErr := clientset.CoreV1().ConfigMaps("default").Delete(context.Background(), cfgMapName, meta.DeleteOptions{})
+				if deleteErr != nil {
+					log.Printf("Error deleting ConfigMap %s: %v", cfgMapName, deleteErr)
+				}
 
-		// Get the pod name associated with the job
-		// pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{
-		// 	LabelSelector: fmt.Sprintf("job-name=%s", name),
-		// })
-		// if err != nil || len(pods.Items) == 0 {
-		// 	http.Error(w, "Failed to list pods for job", http.StatusInternalServerError)
-		// 	return
-		// }
+				log.Printf("Attempting to delete Job %s", jobName)
+				deleteErr = clientset.BatchV1().Jobs("default").Delete(context.Background(), jobName, meta.DeleteOptions{})
+				if deleteErr != nil {
+					log.Printf("Error deleting Job %s: %v", jobName, deleteErr)
+				}
+			}()
 
-		// podName := pods.Items[0].Name
+			var finalStatus string
+			var jobLogs []byte
+			var jobError error
 
-		// // Fetch logs from the pod
-		// logReq := clientset.CoreV1().Pods("default").GetLogs(podName, &corev1.PodLogOptions{})
-		// logStream, err := logReq.Stream(context.TODO())
-		// if err != nil {
-		// 	http.Error(w, "Failed to stream pod logs", http.StatusInternalServerError)
-		// 	return
-		// }
-		// defer logStream.Close()
+			// Poll for Job completion
+			for {
+				job, err := clientset.BatchV1().Jobs("default").Get(context.TODO(), jobName, meta.GetOptions{})
+				if err != nil {
+					jobError = fmt.Errorf("Failed to get job status for %s: %v", jobName, err)
+					finalStatus = "failed"
+					break
+				}
 
-		// logs, err := io.ReadAll(logStream)
-		// if err != nil {
-		// 	http.Error(w, "Failed to read pod logs", http.StatusInternalServerError)
-		// 	return
-		// }
+				if job.Status.Succeeded > 0 {
+					finalStatus = "succeeded"
+					break
+				} else if job.Status.Failed > 0 {
+					finalStatus = "failed"
+					jobError = fmt.Errorf("Job %s failed on Kubernetes", jobName)
+					break
+				}
 
-		// completion := time.Now()
-		// updateLatency(startTime, completion)
-		// w.Header().Set("Content-Type", "application/json")
-		// w.Write(logs)
+				time.Sleep(2 * time.Second) // Poll every 2 seconds
+			}
 
-		mu.Lock()
-		jobTimes[name] = struct{Start,End time.Time}{Start: startTime}
-		mu.Unlock()
+			// Fetch logs if the job succeeded or failed
+			if finalStatus == "succeeded" || finalStatus == "failed" {
+				pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), meta.ListOptions{
+					LabelSelector: fmt.Sprintf("job-name=%s", jobName),
+				})
+				if err != nil || len(pods.Items) == 0 {
+					jobError = fmt.Errorf("Failed to list pods for job %s: %v", jobName, err)
+					// Keep finalStatus as it was, but add log fetching error
+				} else {
+					podName := pods.Items[0].Name // Assuming one pod per job
+					logReq := clientset.CoreV1().Pods("default").GetLogs(podName, &corev1.PodLogOptions{})
+					logStream, err := logReq.Stream(context.TODO())
+					if err != nil {
+						jobError = fmt.Errorf("Failed to stream pod logs for %s (pod %s): %v", jobName, podName, err)
+						// Keep finalStatus as it was, but add log fetching error
+					} else {
+						defer logStream.Close()
+						logs, err := io.ReadAll(logStream)
+						if err != nil {
+							jobError = fmt.Errorf("Failed to read pod logs for %s (pod %s): %v", jobName, podName, err)
+							// Keep finalStatus as it was, but add log fetching error
+						} else {
+							jobLogs = logs
+						}
+					}
+				}
+			}
 
-		// launch a goroutine that waits for completion & collects logs
-		go watchJob(name, startTime, clientset)
+			// Update job store with final status and results
+			jobStoreMutex.Lock()
+			if js, ok := jobStore[jobName]; ok {
+				js.Status = finalStatus
+				js.Results = jobLogs
+				js.Error = jobError
+			}
+			jobStoreMutex.Unlock()
+			log.Printf("Job %s completed with status: %s", jobName, finalStatus)
+
+			// updateLatency(startTime, time.Now()) // If you want to log latency on server side
+		}(name, configMapName, clientset) // Pass needed variables to the goroutine
+
+		// Respond to the client immediately after creating the job
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted) // 202 Accepted means request accepted for asynchronous processing
+		json.NewEncoder(w).Encode(JobResponse{
+			Status: "Job created, please poll /status/" + name + " for results",
+			JobID:  name,
+		})
+	})
+
+	/*
+	* NEW: STATUS Request Handler
+	* This endpoint allows clients to poll for job status and results.
+	*/
+	http.HandleFunc("/status/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Only GET method allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extract jobName from the URL path, e.g., /status/my-job-name
+		jobName := strings.TrimPrefix(r.URL.Path, "/status/")
+		if jobName == "" {
+			http.Error(w, "Missing job ID in URL path, e.g., /status/my-job-name", http.StatusBadRequest)
+			return
+		}
+
+		jobStoreMutex.Lock()
+		jobState, found := jobStore[jobName]
+		jobStoreMutex.Unlock()
+
+		if !found {
+			http.Error(w, "Job ID not found or has been cleaned up", http.StatusNotFound)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"job": name,
-			"msg": "accepted",
-		})
-		return
-				
-			})
+		responsePayload := JobStatusPayload{
+			Status: jobState.Status,
+		}
+
+		if jobState.Status == "succeeded" || jobState.Status == "failed" {
+			responsePayload.Results = string(jobState.Results)
+			if jobState.Error != nil {
+				responsePayload.Error = jobState.Error.Error()
+			}
+		}
+
+		json.NewEncoder(w).Encode(responsePayload)
+	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -251,52 +343,6 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Server is running"})
 	})
 
-	http.HandleFunc("/result", func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
-		mu.Lock()
-		data, ok := jobResults[id]
-		mu.Unlock()
-
-		if !ok {
-			http.Error(w, "still running", http.StatusAccepted)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
-	})
-
 	log.Println("Server listening on :5000")
 	log.Fatal(http.ListenAndServe(":5000", nil))
-}
-
-func watchJob(jobName string, start time.Time, cs *kubernetes.Clientset) {
-    jobCli  := cs.BatchV1().Jobs("default")
-    podCli  := cs.CoreV1().Pods("default")
-
-    // ❶ wait for the Job to finish
-    for {
-        j, _ := jobCli.Get(context.TODO(), jobName, meta.GetOptions{})
-        if j.Status.Succeeded > 0 || j.Status.Failed > 0 {
-            break
-        }
-        time.Sleep(2 * time.Second)
-    }
-
-    // ❷ find the pod & grab logs
-    pods, _ := podCli.List(context.TODO(),
-        meta.ListOptions{LabelSelector: "job-name=" + jobName})
-    pod := pods.Items[0].Name
-    bytes, _ := podCli.GetLogs(pod, &corev1.PodLogOptions{}).
-                Do(context.TODO()).Raw()
-
-    end := time.Now()
-
-    // ❸ update global maps and latency
-    mu.Lock()
-    jobResults[jobName] = bytes
-    jt := jobTimes[jobName]
-    jt.End = end
-    jobTimes[jobName] = jt
-    updateLatency(start, end)
-    mu.Unlock()
 }

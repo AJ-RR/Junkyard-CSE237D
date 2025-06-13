@@ -30,7 +30,7 @@ func init() {
 
 func updateLatency(start, end time.Time) {
 	delta := end.Sub(start).Seconds()
-
+	log.Printf("Updated the latency")
 	// first job ever
 	if state.Jobs == 0 || start.Before(state.MinStart) {
 		state.MinStart = start

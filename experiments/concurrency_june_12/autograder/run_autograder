@@ -1,89 +1,143 @@
 #!/bin/bash
-set -e
+set -e # Exit immediately if a command exits with a non-zero status
 
-URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope" # adjust to your Go server's URL
+# --- Configuration ---
+URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope" # <--- IMPORTANT: Replace with the actual, reachable IP/hostname of your Go server
+                                     # (e.g., LoadBalancer IP, Ingress URL, or internal ClusterIP if both are in same cluster and you handle network)
 SUBMISSION_DIR="/autograder/submission"
 ZIP_FILE="/tmp/submission.zip"
 RESULTS_JSON="/autograder/results/results.json"
-TIMEOUT=300         # seconds for overall job completion
-INTERVAL=3          # poll interval in seconds
+TIMEOUT=300         # Max seconds to wait for job completion
+INTERVAL=5          # Poll interval in seconds
+
+# --- Initial Setup & Submission ---
+echo "DEBUG: Starting autograder script." | tee -a /dev/stderr
+echo "DEBUG: Current directory: $(pwd)" | tee -a /dev/stderr
+echo "DEBUG: Listing submission directory contents:" | tee -a /dev/stderr
+ls -l "$SUBMISSION_DIR" | tee -a /dev/stderr
+
+# Ensure jq is installed (add this to your Gradescope setup.sh if not already there)
+# apt-get update && apt-get install -y jq
 
 # 1. Zip submission
-cd "$SUBMISSION_DIR"
-zip -qr "$ZIP_FILE" .
-cd -
+cd "$SUBMISSION_DIR" || { echo '{"score": 0, "output": "Failed to change to submission directory."}' > "$RESULTS_JSON"; exit 1; }
+zip -qr "$ZIP_FILE" . || { echo '{"score": 0, "output": "Failed to zip submission."}' > "$RESULTS_JSON"; exit 1; }
+echo "DEBUG: Zipped submission to $ZIP_FILE" | tee -a /dev/stderr
+cd - > /dev/null
+
+# Get student name and assignment title (replace with actual Gradescope env vars if available)
+STUDENT_NAME=${GR_STUDENT_NAME:-"unknown_student"} # Example, adjust as per Gradescope env
+ASSIGNMENT_TITLE=${GR_ASSIGNMENT_TITLE:-"unknown_assignment"} # Example, adjust as per Gradescope env
+echo "DEBUG: Student: $STUDENT_NAME, Assignment: $ASSIGNMENT_TITLE" | tee -a /dev/stderr
 
 # 2. Submit job to Go server and get JOB_ID
-echo "Submitting job to Go server..."
-SUBMIT_RESP=$(curl -s -F "name=$STUDENT_NAME" \
+echo "DEBUG: Submitting job to Go server at $URL_BASE/submit" | tee -a /dev/stderr
+SUBMIT_RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -F "name=$STUDENT_NAME" \
                   -F "image=$ASSIGNMENT_TITLE" \
                   -F "script=@$ZIP_FILE" \
                   "$URL_BASE/submit")
 
-# Check for cURL errors or empty response
-if [ $? -ne 0 ]; then
-    echo "Error submitting job: cURL failed." >&2
-    echo '{"score": 0, "output": "Failed to submit job to grading server."}' > "$RESULTS_JSON"
+HTTP_STATUS=$(echo "$SUBMIT_RESP" | tail -n1 | sed -e 's/HTTP_STATUS://')
+BODY_RESP=$(echo "$SUBMIT_RESP" | sed '$d')
+
+echo "DEBUG: Submit HTTP Status: $HTTP_STATUS" | tee -a /dev/stderr
+echo "DEBUG: Submit Body Response: $BODY_RESP" | tee -a /dev/stderr
+
+if [ "$HTTP_STATUS" -ne 202 ]; then
+    echo "ERROR: Initial job submission failed with HTTP status $HTTP_STATUS." | tee -a /dev/stderr
+    echo '{"score": 0, "output": "Failed to submit job to grading server: HTTP Status '"$HTTP_STATUS"'\nServer Response:\n'"$BODY_RESP"'"}' > "$RESULTS_JSON"
     exit 1
 fi
 
-JOB_ID=$(echo "$SUBMIT_RESP" | jq -r '.job_id')
-SUBMIT_STATUS=$(echo "$SUBMIT_RESP" | jq -r '.status')
+# Extract JOB_ID using jq
+JOB_ID=$(echo "$BODY_RESP" | jq -r '.job_id // empty') # Use // empty for robust handling of null/missing
+SUBMIT_SERVER_MSG=$(echo "$BODY_RESP" | jq -r '.status // empty')
 
-if [ -z "$JOB_ID" ] || [ "$SUBMIT_STATUS" != "Job created, please poll /status/$JOB_ID for results" ]; then
-    echo "Error: Failed to get valid JOB_ID from submission. Server response: $SUBMIT_RESP" >&2
-    echo '{"score": 0, "output": "Failed to initiate grading job."}' > "$RESULTS_JSON"
+echo "DEBUG: Parsed JOB_ID: '$JOB_ID'" | tee -a /dev/stderr
+echo "DEBUG: Server message from submit: '$SUBMIT_SERVER_MSG'" | tee -a /dev/stderr
+
+if [ -z "$JOB_ID" ]; then
+    echo "ERROR: Failed to get valid JOB_ID from submission response." | tee -a /dev/stderr
+    echo '{"score": 0, "output": "Failed to get job ID from grading server. Server response:\n'"$BODY_RESP"'"}' > "$RESULTS_JSON"
     exit 1
 fi
 
-echo "Job submitted. JOB_ID: $JOB_ID. Polling for results..."
+echo "DEBUG: Job submitted. JOB_ID: $JOB_ID. Polling for results..." | tee -a /dev/stderr
 
 # 3. Poll for job status
 END_TIME=$(( SECONDS + TIMEOUT ))
 JOB_COMPLETE=false
-JOB_RESULTS=""
-JOB_ERROR=""
+JOB_STATUS=""
+JOB_RESULTS_OUTPUT=""
+JOB_SERVER_ERROR=""
 
 while [ $SECONDS -lt "$END_TIME" ]; do
+    echo "DEBUG: Polling URL: $URL_BASE/status/$JOB_ID (Time remaining: $(( END_TIME - SECONDS ))s)" | tee -a /dev/stderr
     STATUS_RESP=$(curl -s "$URL_BASE/status/$JOB_ID")
-    
-    if [ $? -ne 0 ]; then
-        echo "Error polling job status: cURL failed." >&2
+    CURL_EXIT_CODE=$? # Capture curl exit code
+
+    if [ "$CURL_EXIT_CODE" -ne 0 ]; then
+        echo "WARNING: Error polling job status (curl exit code $CURL_EXIT_CODE). Retrying..." | tee -a /dev/stderr
         # Don't exit immediately, retry until timeout
+    else
+        echo "DEBUG: STATUS_RESP received: $STATUS_RESP" | tee -a /dev/stderr
+        
+        # Robustly parse JSON. If jq fails, set status to an error state.
+        if ! PARSED_STATUS=$(echo "$STATUS_RESP" | jq -r '.status // empty'); then
+            echo "ERROR: Failed to parse JSON status from polling response: $STATUS_RESP" | tee -a /dev/stderr
+            JOB_STATUS="json_parse_error" # Set a distinct status for debugging
+        else
+            JOB_STATUS="$PARSED_STATUS"
+            echo "DEBUG: Current Job Status: $JOB_STATUS" | tee -a /dev/stderr
+        fi
+        
+        if [ "$JOB_STATUS" == "succeeded" ] || [ "$JOB_STATUS" == "failed" ]; then
+            JOB_RESULTS_OUTPUT=$(echo "$STATUS_RESP" | jq -r '.results // empty')
+            JOB_SERVER_ERROR=$(echo "$STATUS_RESP" | jq -r '.error // empty')
+            JOB_COMPLETE=true
+            break
+        elif [ "$JOB_STATUS" == "json_parse_error" ] || [ "$JOB_STATUS" == "pending" ] || [ "$JOB_STATUS" == "" ]; then
+            # Continue waiting
+            :
+        else
+            # Unknown status, log and continue
+            echo "WARNING: Received unknown job status: '$JOB_STATUS'. Retrying..." | tee -a /dev/stderr
+        fi
     fi
 
-    CURRENT_STATUS=$(echo "$STATUS_RESP" | jq -r '.status')
-    
-    if [ "$CURRENT_STATUS" == "succeeded" ] || [ "$CURRENT_STATUS" == "failed" ]; then
-        JOB_RESULTS=$(echo "$STATUS_RESP" | jq -r '.results')
-        JOB_ERROR=$(echo "$STATUS_RESP" | jq -r '.error // ""') # Use // "" to handle null error
-        JOB_COMPLETE=true
-        break
-    fi
-
-    echo "Job $JOB_ID is still $CURRENT_STATUS. Waiting $INTERVAL seconds..."
     sleep "$INTERVAL"
 done
 
 if [ "$JOB_COMPLETE" == "false" ]; then
-    echo "Error: Job $JOB_ID timed out after $TIMEOUT seconds." >&2
-    echo '{"score": 0, "output": "Grading job timed out."}' > "$RESULTS_JSON"
+    echo "ERROR: Job $JOB_ID timed out after $TIMEOUT seconds." | tee -a /dev/stderr
+    echo '{"score": 0, "output": "Grading job timed out or encountered persistent polling issues."}' > "$RESULTS_JSON"
     exit 1
 fi
 
 # 4. Write results to results.json
-if [ -n "$JOB_ERROR" ]; then
-    echo "Job $JOB_ID completed with errors: $JOB_ERROR" >&2
+echo "DEBUG: Job $JOB_ID completed. Final status: $JOB_STATUS" | tee -a /dev/stderr
+if [ "$JOB_STATUS" == "failed" ] || [ -n "$JOB_SERVER_ERROR" ]; then
+    echo "ERROR: Job $JOB_ID completed with errors from server: $JOB_SERVER_ERROR" | tee -a /dev/stderr
     # If the job itself reported an error, ensure it's reflected in results.json
-    echo '{"score": 0, "output": "Grading job failed: '"$JOB_ERROR"'\nJob Output:\n'"$JOB_RESULTS"'"}' > "$RESULTS_JSON"
-else
-    echo "Job $JOB_ID completed successfully. Writing results to $RESULTS_JSON"
-    # Assuming your job output is already valid JSON for Gradescope
-    echo "$JOB_RESULTS" > "$RESULTS_JSON"
+    # Attempt to use JSON output if available, otherwise default to generic error
+    if echo "$JOB_RESULTS_OUTPUT" | jq . >/dev/null 2>&1; then # Check if results output is valid JSON
+        echo "$JOB_RESULTS_OUTPUT" > "$RESULTS_JSON" # Use the job's own output if it's JSON
+    else
+        echo '{"score": 0, "output": "Grading job failed.\nServer Error: '"$JOB_SERVER_ERROR"'\nJob Output:\n'"$JOB_RESULTS_OUTPUT"'"}' > "$RESULTS_JSON"
+    fi
+else # Job succeeded
+    echo "DEBUG: Job $JOB_ID completed successfully. Writing results to $RESULTS_JSON" | tee -a /dev/stderr
+    # Assuming your job output (JOB_RESULTS_OUTPUT) is already valid JSON for Gradescope
+    if echo "$JOB_RESULTS_OUTPUT" | jq . >/dev/null 2>&1; then # Basic check if output is valid JSON
+        echo "$JOB_RESULTS_OUTPUT" > "$RESULTS_JSON"
+    else
+        echo '{"score": 0, "output": "Grading job succeeded but produced invalid JSON output.\nOutput:\n'"$JOB_RESULTS_OUTPUT"'"}' > "$RESULTS_JSON"
+    fi
 fi
 
 # Verify results.json content for debugging (optional)
-echo "Content of $RESULTS_JSON:"
-cat "$RESULTS_JSON"
+echo "DEBUG: Final content of $RESULTS_JSON:" | tee -a /dev/stderr
+cat "$RESULTS_JSON" | tee -a /dev/stderr
 
+echo "DEBUG: Autograder script finished." | tee -a /dev/stderr
 exit 0

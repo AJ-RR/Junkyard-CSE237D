@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp" // Import the regexp package
 	"strings"
 	"sync" // For protecting the jobStore map
 	"time"
@@ -48,6 +49,21 @@ type JobInternalState struct {
 var jobStore = make(map[string]*JobInternalState)
 var jobStoreMutex sync.Mutex // Mutex to protect jobStore from concurrent access
 
+// sanitizeK8sName converts a string to be RFC 1123 compliant (lowercase alphanumeric, '-', '.', and starts/ends with alphanumeric).
+func sanitizeK8sName(s string) string {
+    // Convert to lowercase
+    s = strings.ToLower(s)
+    // Replace any characters not allowed by RFC 1123 (alphanumeric, -, .) with a hyphen
+    reg := regexp.MustCompile("[^a-z0-9.-]+")
+    s = reg.ReplaceAllString(s, "-")
+    // Trim leading/trailing hyphens/dots
+    s = strings.Trim(s, "-.")
+    // Replace multiple hyphens with a single hyphen
+    s = strings.ReplaceAll(s, "--", "-")
+    return s
+}
+
+
 func main() {
 	// Load kubeconfig from default or env var
 	var config *rest.Config
@@ -87,12 +103,18 @@ func main() {
 		}
 
 		// Read metadata of request (Student name, assignment name, etc.)
-		student := strings.ToLower(r.FormValue("name"))
-		assignment := strings.ToLower(r.FormValue("image"))
+		student := r.FormValue("name")
+		assignment := r.FormValue("image")
 		if student == "" || assignment == "" {
 			http.Error(w, "Missing 'name' or 'image' field", http.StatusBadRequest)
 			return
 		}
+
+		// --- FIX START: Sanitize student and assignment names ---
+		student = sanitizeK8sName(student)
+		assignment = sanitizeK8sName(assignment)
+		// --- FIX END ---
+		
 		name := fmt.Sprintf("%s-%s-%d", student, assignment, time.Now().Unix())
 		// startTime := time.Now() // Keep for potential latency tracking later
 
@@ -303,7 +325,6 @@ func main() {
 		// Extract jobName from the URL path, e.g., /status/my-job-name
 		jobName := strings.TrimPrefix(r.URL.Path, "/status/")
 		if jobName == "" {
-			// FIX: Added http.StatusBadRequest as the third argument
 			http.Error(w, "Missing job ID in URL path, e.g., /status/my-job-name", http.StatusBadRequest)
 			return
 		}

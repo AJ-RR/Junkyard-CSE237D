@@ -29,7 +29,7 @@ func init() {
 }
 
 func updateLatency(start time.Time, end time.Time) {
-	delta := end.Sub(start).Seconds()
+	// delta := end.Sub(start).Seconds()
 	// log.Printf("Updated the latency")
 	// first job ever
 	log.Printf("Start time: %s", start)

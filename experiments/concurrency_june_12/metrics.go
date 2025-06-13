@@ -39,7 +39,7 @@ func updateLatency(start, end time.Time) {
 		state.MaxEnd = end
 	}
 	// state.TotalSeconds += delta
-	state.TotalSeconds = state.MaxEnd.Sub(state.MinStart)
+	state.TotalSeconds = state.MaxEnd.Sub(state.MinStart).Seconds()
 	state.Jobs++
 
 	save()

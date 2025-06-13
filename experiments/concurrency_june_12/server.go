@@ -238,7 +238,7 @@ func main() {
 		jobStoreMutex.Unlock()
 
 		// Start a goroutine to monitor the job and update its status
-		go func(jobName string, cfgMapName string, clientset *kubernetes.Clientset) {
+		go func(jobName string, cfgMapName string, clientset *kubernetes.Clientset, jobSubmissionTime time.Time) {
 			log.Printf("Starting goroutine to monitor job %s", jobName)
 
 			// Ensure ConfigMap and Job are eventually deleted after monitoring completes
@@ -323,9 +323,9 @@ func main() {
 			}
 			jobStoreMutex.Unlock()
 			log.Printf("Job %s completed with status: %s, Latency: %s", jobName, finalStatus, individualJobLatency)
-
+			completion := time.Now()
 			// updateLatency(startTime, time.Now()) // If you want to log latency on server side
-		}(name, configMapName, clientset) // Pass needed variables to the goroutine
+		}(name, configMapName, clientset, submissionTime) // Pass needed variables to the goroutine
 
 		// Respond to the client immediately after creating the job
 		w.Header().Set("Content-Type", "application/json")

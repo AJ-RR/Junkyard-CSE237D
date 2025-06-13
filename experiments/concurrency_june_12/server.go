@@ -325,7 +325,7 @@ func main() {
 			log.Printf("Job %s completed with status: %s, Latency: %s", jobName, finalStatus, individualJobLatency)
 			completion := time.Now()
 			log.Printf("Calling updateLatency")
-			updateLatency(submissionTime, time.Now()) // If you want to log latency on server side
+			updateLatency(submissionTime, completion) // If you want to log latency on server side
 			log.Printf("Completed executing updateLatency")
 		}(name, configMapName, clientset, submissionTime) // Pass needed variables to the goroutine
 

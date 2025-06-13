@@ -30,17 +30,33 @@ type JobResponse struct {
 }
 
 // JobStatusPayload is sent back to the client when polling for status.
+// type JobStatusPayload struct {
+// 	Status  string `json:"status"`            // "pending", "succeeded", "failed"
+// 	Results string `json:"results,omitempty"` // Logs from the job
+// 	Error   string `json:"error,omitempty"`   // Error message if job failed or logs couldn't be fetched
+// }
+
+// JobStatusPayload is sent back to the client when polling for status.
 type JobStatusPayload struct {
 	Status  string `json:"status"`            // "pending", "succeeded", "failed"
 	Results string `json:"results,omitempty"` // Logs from the job
 	Error   string `json:"error,omitempty"`   // Error message if job failed or logs couldn't be fetched
+	Latency string `json:"latency,omitempty"` // Add latency field (will be a string like "1m30s")
 }
+
+// // JobInternalState holds the internal state of a job managed by this server.
+// type JobInternalState struct {
+// 	Status  string    // "pending", "succeeded", "failed"
+// 	Results []byte    // Raw logs from the job
+// 	Error   error     // Go error object if any issue occurred
+// }
 
 // JobInternalState holds the internal state of a job managed by this server.
 type JobInternalState struct {
-	Status  string    // "pending", "succeeded", "failed"
-	Results []byte    // Raw logs from the job
-	Error   error     // Go error object if any issue occurred
+	Status  string      // "pending", "succeeded", "failed"
+	Results []byte      // Raw logs from the job
+	Error   error       // Go error object if any issue occurred
+	Latency time.Duration // Add field for individual job latency
 }
 
 // jobStore is an in-memory map to store the state of all active jobs.
@@ -200,7 +216,8 @@ func main() {
 				},
 			},
 		}
-
+		// Capture the time when the submission request was received
+		submissionTime := time.Now()
 		// Create the Kubernetes Job
 		_, err = jobClient.Create(context.TODO(), job, meta.CreateOptions{})
 		if err != nil {
@@ -293,15 +310,19 @@ func main() {
 				}
 			}
 
-			// Update job store with final status and results
+			completionTime := time.Now()
+			individualJobLatency := completionTime.Sub(submissionTime) // Calculate latency
+
+			// Update job store with final status, results, and latency
 			jobStoreMutex.Lock()
 			if js, ok := jobStore[jobName]; ok {
 				js.Status = finalStatus
 				js.Results = jobLogs
 				js.Error = jobError
+				js.Latency = individualJobLatency // Store the calculated latency
 			}
 			jobStoreMutex.Unlock()
-			log.Printf("Job %s completed with status: %s", jobName, finalStatus)
+			log.Printf("Job %s completed with status: %s, Latency: %s", jobName, finalStatus, individualJobLatency)
 
 			// updateLatency(startTime, time.Now()) // If you want to log latency on server side
 		}(name, configMapName, clientset) // Pass needed variables to the goroutine
@@ -343,9 +364,10 @@ func main() {
 			Status: jobState.Status,
 		}
 
-		// Only include results/error if the job is actually complete
+		// Only include results/error/latency if the job is actually complete
 		if jobState.Status == "succeeded" || jobState.Status == "failed" {
 			responsePayload.Results = string(jobState.Results)
+			responsePayload.Latency = jobState.Latency.String() // Convert time.Duration to string
 			if jobState.Error != nil {
 				responsePayload.Error = jobState.Error.Error()
 			}

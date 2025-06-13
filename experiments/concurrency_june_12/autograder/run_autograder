@@ -2,13 +2,17 @@
 set -e # Exit immediately if a command exits with a non-zero status
 
 # --- Configuration ---
-URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope" # <--- IMPORTANT: Replace with the actual, reachable IP/hostname of your Go server
+URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope"
                                      # (e.g., LoadBalancer IP, Ingress URL, or internal ClusterIP if both are in same cluster and you handle network)
 SUBMISSION_DIR="/autograder/submission"
 ZIP_FILE="/tmp/submission.zip"
 RESULTS_JSON="/autograder/results/results.json"
 TIMEOUT=300         # Max seconds to wait for job completion
 INTERVAL=5          # Poll interval in seconds
+METADATA_FILE="/autograder/submission_metadata.json"
+
+STUDENT_NAME=$(jq -r '.users[0].name' "$METADATA_FILE" | tr ' ' '-')
+ASSIGNMENT_TITLE=$(jq -r '.assignment.title' "$METADATA_FILE" | tr ' ' '-')
 
 # --- Initial Setup & Submission ---
 echo "DEBUG: Starting autograder script." | tee -a /dev/stderr
@@ -24,11 +28,6 @@ cd "$SUBMISSION_DIR" || { echo '{"score": 0, "output": "Failed to change to subm
 zip -qr "$ZIP_FILE" . || { echo '{"score": 0, "output": "Failed to zip submission."}' > "$RESULTS_JSON"; exit 1; }
 echo "DEBUG: Zipped submission to $ZIP_FILE" | tee -a /dev/stderr
 cd - > /dev/null
-
-# Get student name and assignment title (replace with actual Gradescope env vars if available)
-STUDENT_NAME=${GR_STUDENT_NAME:-"unknown_student"} # Example, adjust as per Gradescope env
-ASSIGNMENT_TITLE=${GR_ASSIGNMENT_TITLE:-"unknown_assignment"} # Example, adjust as per Gradescope env
-echo "DEBUG: Student: $STUDENT_NAME, Assignment: $ASSIGNMENT_TITLE" | tee -a /dev/stderr
 
 # 2. Submit job to Go server and get JOB_ID
 echo "DEBUG: Submitting job to Go server at $URL_BASE/submit" | tee -a /dev/stderr

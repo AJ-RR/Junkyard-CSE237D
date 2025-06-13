@@ -190,7 +190,7 @@ func main() {
 						Containers: []corev1.Container{
 							{
 								Name:            "runner",
-								Image:           "rsankar12/opencl_cse160", // Rishab's OpenCL image for container
+								Image:           "rsankar12/opencl_cse160", // Rishab's OpenCL image for containers
 								Command: []string{
 									"sh", "-c",
 									// ① unzip silently

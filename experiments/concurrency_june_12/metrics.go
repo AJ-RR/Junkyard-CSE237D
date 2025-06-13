@@ -28,10 +28,12 @@ func init() {
 	}
 }
 
-func updateLatency(start, end time.Time) {
+func updateLatency(start time.Time, end time.Time) {
 	delta := end.Sub(start).Seconds()
-	log.Printf("Updated the latency")
+	// log.Printf("Updated the latency")
 	// first job ever
+	log.Printf("Start time: %s", start)
+	log.Printf("End time: %s", end)
 	if state.Jobs == 0 || start.Before(state.MinStart) {
 		state.MinStart = start
 	}
@@ -39,6 +41,7 @@ func updateLatency(start, end time.Time) {
 		state.MaxEnd = end
 	}
 	// state.TotalSeconds += delta
+
 	state.TotalSeconds = state.MaxEnd.Sub(state.MinStart).Seconds()
 	state.Jobs++
 

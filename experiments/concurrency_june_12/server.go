@@ -329,6 +329,9 @@ func main() {
 			log.Printf("Completed executing updateLatency")
 		}(name, configMapName, clientset, submissionTime) // Pass needed variables to the goroutine
 
+		jobCreationCompletionTime := time.Now()
+		jobCreationLatency := jobCreationCompletionTime.Sub(submissionTime) // Calculate latency
+		log.Printf("Job creation Latency: %s", jobCreationLatency)
 		// Respond to the client immediately after creating the job
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted) // 202 Accepted means request accepted for asynchronous processing

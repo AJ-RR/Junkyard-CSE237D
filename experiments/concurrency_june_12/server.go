@@ -191,7 +191,6 @@ func main() {
 							{
 								Name:            "runner",
 								Image:           "rsankar12/opencl_cse160", // Rishab's OpenCL image for container
-								ImagePullPolicy: corev1.PullAlways,
 								Command: []string{
 									"sh", "-c",
 									// ① unzip silently

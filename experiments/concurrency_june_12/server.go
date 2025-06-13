@@ -323,7 +323,7 @@ func main() {
 			}
 			jobStoreMutex.Unlock()
 			log.Printf("Job %s completed with status: %s, Latency: %s", jobName, finalStatus, individualJobLatency)
-			completion := time.Now()
+			// completion := time.Now()
 			// updateLatency(startTime, time.Now()) // If you want to log latency on server side
 		}(name, configMapName, clientset, submissionTime) // Pass needed variables to the goroutine
 

@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+apt-get update -qq && apt-get install -y -qq curl jq zip
+
+URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope"
+SUBMISSION_DIR="/autograder/submission"
+RESULTS_JSON="/autograder/results/results.json"
+ZIP_FILE="/tmp/submission.zip"
+
+cd "$SUB" && zip -qr "$ZIP" . && cd -
+
+# submit
+job=$(curl -s \
+       -F "name=@/dev/null;filename=name.txt;type=text/plain" \
+       -F "image=@/dev/null;filename=image.txt;type=text/plain" \
+       -F "script=@$ZIP" "$URL_B/submit" | jq -r .job)
+
+echo "JOB=$job"
+
+# poll
+for i in {1..100}; do
+  code=$(curl -s -w '%{http_code}' -o /tmp/out.json \
+        "$URL_B/result?id=$job")
+  if [ "$code" = "200" ]; then
+      mv /tmp/out.json "$RES"
+      exit 0
+  fi
+  sleep 3
+done
+
+# timeout
+echo '{"score":0,"output":"Timed out waiting for cluster"}' >"$RES"

@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+
+URL_BASE="https://smartcycling.sysnet.ucsd.edu/gradescope"   # adjust
+SUBMISSION_DIR="/autograder/submission"
+ZIP_FILE="/tmp/submission.zip"
+RESULTS_JSON="/autograder/results/results.json"
+TIMEOUT=300         # seconds
+INTERVAL=3          # poll interval
+
+# 1 zip submission
+cd "$SUBMISSION_DIR"
+zip -qr "$ZIP_FILE" .
+cd -
+
+# 2 submit
+RESP=$(curl -s -F "name=$STUDENT_NAME" \
+               -F "image=$ASSIGNMENT_TITLE" \
+               -F "script=@$ZIP_FILE" \
+               "$URL_BASE/submit")
+JOB=$(echo "$RESP" | jq -r '.job')
+
+# 3 poll until the result is ready
+echo "Polling job $JOB …"
+ELAPSED=0
+while true; do
+  OUT=$(curl -s -w "%{http_code}" -o /tmp/out.json \
+        "$URL_BASE/result?id=$JOB")
+  CODE=${OUT: -3}                             # HTTP status
+  if [ "$CODE" = "200" ]; then
+      mv /tmp/out.json "$RESULTS_JSON"
+      echo "Result ready."
+      break
+  fi
+  sleep "$INTERVAL"
+  ELAPSED=$((ELAPSED+INTERVAL))
+  if [ $ELAPSED -gt $TIMEOUT ]; then
+      echo '{"score":0,"output":"Timed out waiting for result."}' >"$RESULTS_JSON"
+      break
+  fi
+done

@@ -441,8 +441,10 @@ fi
 		if jobState.Status == "succeeded" || jobState.Status == "failed" {
 			responsePayload.Results = string(jobState.Results)
 			responsePayload.Latency = jobState.Latency.String() // Convert time.Duration to string
-				responsePayload.Error = jobState.Error.Error()
+			if jobState.Error != nil {	
+			responsePayload.Error = jobState.Error.Error()
 			}
+		}
 		
 
 		json.NewEncoder(w).Encode(responsePayload)

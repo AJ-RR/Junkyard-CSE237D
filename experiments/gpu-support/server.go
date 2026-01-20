@@ -24,6 +24,49 @@ import (
 func boolPtr(b bool) *bool {
 	return &b
 }
+// 2. The Cleanup Function
+func startCleanupTimer(interval time.Duration, maxAge time.Duration) {
+    go func() {
+        for {
+            time.Sleep(interval)
+            now := time.Now()
+            jobStoreMutex.Lock()
+            for id, state := range jobStore {
+                if now.Sub(state.CreatedAt) > maxAge {
+                    delete(jobStore, id)
+                    log.Printf("Cleaned up expired job: %s", id)
+                }
+            }
+            jobStoreMutex.Unlock()
+        }
+    }()
+}
+
+func (js *JobInternalState) ParseResults() (string, int, error) {
+    raw := string(js.Results)
+
+    // 1. Separate logs from JSON
+    parts := strings.Split(raw, "---JSON_START---")
+    logs := strings.TrimSpace(parts[0])
+
+    if len(parts) < 2 {
+        return logs, 0, fmt.Errorf("metadata not found in logs")
+    }
+
+    // 2. Extract JSON part
+    jsonPart := strings.Split(parts[1], "---JSON_END---")[0]
+
+    // 3. Parse the score from the JSON
+    var data struct {
+        Score int `json:"score"`
+    }
+    if err := json.Unmarshal([]byte(jsonPart), &data); err != nil {
+        return logs, 0, err
+    }
+
+    return logs, data.Score, nil
+}
+
 // JobResponse is sent back to the client immediately after job creation.
 type JobResponse struct {
 	Status string `json:"status"`
@@ -42,6 +85,7 @@ type JobResponse struct {
 type JobStatusPayload struct {
 	Status  string `json:"status"`            // "pending", "succeeded", "failed"
 	Results string `json:"results,omitempty"` // Logs from the job
+	Score   int    `json:"score"`
 	Error   string `json:"error,omitempty"`   // Error message if job failed or logs couldn't be fetched
 	Latency string `json:"latency,omitempty"` // Add latency field (will be a string like "1m30s")
 }
@@ -59,6 +103,7 @@ type JobInternalState struct {
 	Results []byte      // Raw logs from the job
 	Error   error       // Go error object if any issue occurred
 	Latency time.Duration // Add field for individual job latency
+	CreatedAt time.Time
 }
 
 // jobStore is an in-memory map to store the state of all active jobs.
@@ -83,6 +128,7 @@ func sanitizeK8sName(s string) string {
 
 
 func main() {
+	go startCleanupTimer(5*time.Minute, 1*time.Hour)
 	// Load kubeconfig from default or env var
 	var config *rest.Config
 	var err error
@@ -212,28 +258,30 @@ func main() {
 								Name:            "runner",
 								Image:           "gpu-vulkan-opencl:v2", // GPU image saved and loaded locally 
 								ImagePullPolicy: corev1.PullNever,
-								Command: []string{
-    "bash",
+
+/*								Command: []string{
+    
+									"bash",
     "-c",
     `
 set -x
 EXIT=0
 
 # Locate PA2 directory
-PA2DIR=$(find $HOME -maxdepth 2 -type d -name PA2 | head -n1)
+PA2DIR=$(find "$HOME" -maxdepth 2 -type d -name PA2 | head -n1)
 if [ -z "$PA2DIR" ]; then
-    echo "PA2 directory not found"
+    echo "PA2 directory not found" >/dev/null 2>&1
     exit 1
 fi
-echo "Target directory found: $PA2DIR"
+echo "Target directory found: $PA2DIR" >/dev/null 2>&1
 
 # Unzip
-unzip -o /scripts/archive.zip -d "$PA2DIR"
+unzip -o /scripts/archive.zip -d "$PA2DIR" >/dev/null 2>&1
 
 # Build and run
-cd "$PA2DIR" || { echo "Failed to enter PA2 directory"; EXIT=1; }
+cd "$PA2DIR" || { echo "Failed to enter PA2 directory" >/dev/null 2>&1; EXIT=1; }
 if [ "$EXIT" != "1" ]; then
-    make run 2>&1 | tee /tmp/out
+    make run >/tmp/out 2>&1
     EXIT=${PIPESTATUS[0]}
 fi
 
@@ -241,9 +289,50 @@ fi
 if [ "$EXIT" != "0" ]; then
     echo '{"score":0}'
 else
-    echo '--- Final Result ---'
     cat /tmp/out
 fi
+    `,
+
+    "sh", "-c",
+    //  locate PA2 first
+    "PA2DIR=$(find $HOME -type d -name PA2 | head -n1) && " +
+    "{ cd \"$PA2DIR\" 2>/dev/null || EXIT=1; } && " +
+    //  unzip directly into PA2
+    "if [ \"$EXIT\" != \"1\" ]; then unzip -o /scripts/archive.zip -d \"$PA2DIR\" >/dev/null 2>&1 || EXIT=1; fi && " +
+    //  run make, capture output
+    "if [ \"$EXIT\" != \"1\" ]; then make -s run > /tmp/out 2>&1; EXIT=$?; fi; " +
+    // emit only JSON / final output
+    "if [ \"$EXIT\" != \"0\" ]; then echo '{\"score\":0}'; else cat /tmp/out; fi",
+
+},*/
+
+
+Command: []string{
+    "sh", "-c",
+    `
+    # 1. Locate PA2
+    PA2DIR=$(find $HOME -type d -name PA2 | head -n1)
+    if [ -z "$PA2DIR" ]; then echo "Error: PA2 directory not found"; exit 1; fi
+
+    # 2. Prepare and Run
+    cd "$PA2DIR"
+    unzip -o /scripts/archive.zip -d "$PA2DIR" >/dev/null 2>&1
+
+    # 3. Execute make and capture output to a file
+    make -s run > /tmp/out 2>&1
+    EXIT_STATUS=$?
+
+    # 4. ALWAYS print the output file to stdout so Go can fetch it via GetLogs
+    cat /tmp/out
+
+    # 5. Print a separator and a JSON score for easy parsing later
+    echo "\n---METADATA---"
+    if [ $EXIT_STATUS -eq 0 ]; then
+        echo '{"score": 100, "status": "success"}'
+    else
+        echo '{"score": 0, "status": "failed"}'
+        exit 1 # Ensure the Pod registers as 'Failed' in K8s
+    fi
     `,
 },
 
@@ -302,6 +391,7 @@ fi
 		jobStoreMutex.Lock()
 		jobStore[name] = &JobInternalState{
 			Status: "pending",
+			CreatedAt: submissionTime,
 		}
 		jobStoreMutex.Unlock()
 
@@ -408,7 +498,7 @@ fi
 			JobID:  name,
 		})
 	})
-
+	/*
 	// Status Request Handler (`/status/{jobName}`)
 	http.HandleFunc("/status/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -448,8 +538,56 @@ fi
 		
 
 		json.NewEncoder(w).Encode(responsePayload)
-	})
+	})*/
 
+	http.HandleFunc("/status/", func(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodGet {
+        http.Error(w, "Only GET method allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    jobName := strings.TrimPrefix(r.URL.Path, "/status/")
+    jobStoreMutex.Lock()
+    jobState, found := jobStore[jobName]
+    jobStoreMutex.Unlock()
+
+    if !found {
+        http.Error(w, "Job ID not found", http.StatusNotFound)
+        return
+    }
+
+w.Header().Set("Content-Type", "application/json")
+
+    // Create the standard wrapper
+    response := JobStatusPayload{
+        Status:  jobState.Status,
+        Latency: jobState.Latency.String(),
+    }
+
+    if jobState.Status == "succeeded" || jobState.Status == "failed" {
+        rawLogs := string(jobState.Results)
+
+        if strings.Contains(rawLogs, "---JSON_START---") {
+            parts := strings.Split(rawLogs, "---JSON_START---")
+            // This is the student's results.json content
+            jsonContent := strings.Split(parts[1], "---JSON_END---")[0]
+            
+            // Put the student's JSON into the "Results" field as a string
+            // Your Bash script already knows how to handle this!
+            response.Results = strings.TrimSpace(jsonContent)
+        } else {
+            // Fallback if the student's code crashed before printing JSON
+            response.Results = fmt.Sprintf(`{"score": 0, "output": "No grading JSON found. Raw logs: %s"}`, rawLogs)
+        }
+        
+        if jobState.Error != nil {
+            response.Error = jobState.Error.Error()
+        }
+    }
+
+    // Always encode the standard JobStatusPayload wrapper
+    json.NewEncoder(w).Encode(response)
+})
 	// Root Path Handler (`/`)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -460,6 +598,23 @@ fi
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "Server is running"})
 	})
+
+	// 1. The Logs Handler
+http.HandleFunc("/logs/", func(w http.ResponseWriter, r *http.Request) {
+    jobName := strings.TrimPrefix(r.URL.Path, "/logs/")
+    jobStoreMutex.Lock()
+    jobState, found := jobStore[jobName]
+    jobStoreMutex.Unlock()
+
+    if !found {
+        http.Error(w, "Logs not found or cleaned up", http.StatusNotFound)
+        return
+    }
+
+    w.Header().Set("Content-Type", "text/plain")
+    w.Write(jobState.Results)
+})
+
 
 	log.Println("Server listening on :5000")
 	log.Fatal(http.ListenAndServe(":5000", nil))
